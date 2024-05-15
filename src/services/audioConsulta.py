@@ -1,16 +1,21 @@
+import base64
 from datetime import datetime
 import os
 import subprocess
 import tempfile
-from flask import jsonify, request, Response, send_file 
+from flask import jsonify, request, Response, send_file
 from bson import Binary, json_util, ObjectId
 import openai
 from config.mongodb import mongo
+# from transcriber import Transcriber
 
 openai.api_key = os.getenv('openai.api_key')
 
 def send_audioConsultaToWhisper_service(request):
     file = request.files['archivo']
+    file_binary = Binary(file.read())
+    # audio = file.read()
+    # text = Transcriber().transcribe(audio)
     # Creamos un archivo temporal .wav
     # with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_wav_file:
     #     wav_file_path = temp_wav_file.name
@@ -18,15 +23,26 @@ def send_audioConsultaToWhisper_service(request):
     # # Convertimos el archivo recibido a formato .wav usando ffmpeg
     # subprocess.run(['ffmpeg', '-i', file_path, '-ac', '1', '-ar', '16000', wav_file_path])
     # return send_file(wav_file_path, as_attachment=True, attachment_filename='converted_audio.wav')
+
+    # audio_data = base64.b64decode(file)
+
     try:
-        response = openai.Whip.query(model="whisper-large", inputs={"speech": file.read()})
-        return jsonify({'transcription': response['text']}), 200
-    
+        # response =  openai.Audio.transcribe("whisper-1", audio)
+        # response = openai.Whip.query(model="whisper-large", inputs={"speech": file.read()})
+        transcript = openai.audio.transcriptions.create(
+            file = file_binary,
+            model = "whisper-1",
+            response_format = "verbose-json",
+            timestamp_granularities = ["words"]
+        )
+        return jsonify(transcript.words), 200
+        # return jsonify({'transcription': response['text']}), 200
+
     except Exception as e:
         return str(e), 500
-    
+
 def save_audio_file_in_storage_service(request):
-    file = request.files['archivo']  
+    file = request.files['archivo']
     title_audio = request.form.get('title', '')
 
     file_name = file.filename
@@ -62,7 +78,7 @@ def create_audioConsulta_service():
     result_a = save_audio_file_in_storage_service(request)
     result_b = send_audioConsultaToWhisper_service(request)
     # aca recuperar archivo y pasarlo a nueva function
-    # que lo convierta a .wav y lo envie a whisper para 
+    # que lo convierta a .wav y lo envie a whisper para
     # obtener repuesta
     # despues sigue el procesamiento de esta functionpara
     # guardar el audio y transcripcion en mongo
@@ -86,7 +102,7 @@ def update_audioConsulta_service(id):
     data = request.get_json()
     if len(data) == 0:
         return 'Invalid payload', 400
-    
+
     response = mongo.db.audioConsulta.update_one({'_id': ObjectId(id)},{'$set': data})
 
     if response.modified_count >= 1:
@@ -102,4 +118,4 @@ def delete_audioConsulta_service(id):
         return 'audioConsulta not found', 404
 
 
-    
+
