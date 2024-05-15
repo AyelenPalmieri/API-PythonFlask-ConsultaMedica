@@ -1,4 +1,4 @@
-from flask import Flask, render_template
+from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
@@ -9,6 +9,15 @@ from routes.audioConsulta import audioConsulta
 load_dotenv()
 
 app = Flask(__name__)
+
+@app.before_request
+def before_request():
+    headers = {'Access-Control-Allow-Origin': '*',
+               'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+               'Access-Control-Allow-Headers': 'Content-Type'}
+    if request.method.lower() == 'options':
+        return jsonify(headers), 200
+    
 CORS(app, resources={r"/audioConsulta/*": {"origins": "http://localhost:4200"}})
 
 app.config['MONGO_URI'] = os.getenv('MONGO_URI')
