@@ -7,7 +7,7 @@ from bson import Binary, json_util, ObjectId
 import openai
 from config.mongodb import mongo
 
-openai.api_key = 'sk-proj-MP9Ya1BxiAyVYUqsCUm2T3BlbkFJYrYn1V9rjR1N4MQEl6DV'
+openai.api_key = os.getenv('openai.api_key')
 
 def send_audioConsultaToWhisper_service(request):
     file = request.files['archivo']
