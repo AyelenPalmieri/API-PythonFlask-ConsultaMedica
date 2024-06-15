@@ -1,7 +1,7 @@
 from flask import Blueprint, request
 import magic
 
-from services.audioConsulta import create_audioConsulta_service, getAll_audioConsulta_service, get_audioConsulta_service, update_audioConsulta_service, delete_audioConsulta_service
+from services.audioConsulta import get_audioConsulta2_service, create_audioConsulta_service, getAll_audioConsulta_service, get_audioConsulta_service, update_audioConsulta_service, delete_audioConsulta_service
 
 audioConsulta = Blueprint('audioConsulta', __name__)
 
@@ -12,6 +12,10 @@ def getAll_audioConsulta():
 @audioConsulta.route('/<id>', methods=['GET'])
 def get_audioConsulta(id):
     return get_audioConsulta_service(id)
+
+@audioConsulta.route('/new/<id>', methods=['GET'])
+def get_audioConsulta2(id):
+    return get_audioConsulta2_service(id)
 
 @audioConsulta.route('/', methods=['POST'])
 def create_audioConsulta():

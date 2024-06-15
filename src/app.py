@@ -17,7 +17,7 @@ def before_request():
                'Access-Control-Allow-Headers': 'Content-Type'}
     if request.method.lower() == 'options':
         return jsonify(headers), 200
-    
+
 CORS(app, resources={r"/audioConsulta/*": {"origins": "http://localhost:4200"}})
 
 app.config['MONGO_URI'] = os.getenv('MONGO_URI')

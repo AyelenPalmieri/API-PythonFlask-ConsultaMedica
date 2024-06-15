@@ -14,7 +14,10 @@ Content-Type: application/json
 GET http://localhost:4000/audioConsulta HTTP/1.1
 
 ###
-GET http://localhost:4000/audioConsulta/664022ab2aafb9f2eb9dce14 HTTP/1.1
+GET http://localhost:4000/audioConsulta/6643ec8995b2978c756405be HTTP/1.1
+
+###
+GET http://localhost:4000/audioConsulta/new/666d0e0f7fbacf8f133fecf9 HTTP/1.1
 
 ###
 PUT http://localhost:4000/audioConsulta/664022ab2aafb9f2eb9dce14 HTTP/1.1
