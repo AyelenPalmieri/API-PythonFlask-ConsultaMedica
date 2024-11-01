@@ -18,7 +18,8 @@ def init_audio_consulta_service(db, fs):
     def transcribe_audio_file():
         data = request.get_json()
         file_id = data['file_id']
-        return send_audio_to_whisper_service('66fd9f9a5eaa8d65a86ad172', fs)
+        # return send_audio_to_whisper_service('66fd9f9a5eaa8d65a86ad172', fs)
+        return send_audio_to_whisper_service(file_id, fs)
 
     @audio_consulta_service.route('/upload', methods=['POST'])
     def upload_audio_file_in_storage():
