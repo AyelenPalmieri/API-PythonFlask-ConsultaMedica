@@ -8,9 +8,45 @@ from flask import jsonify, request, Response, send_file
 from bson import Binary, json_util, ObjectId
 import openai
 from config.mongodb import mongo
+from pydub import AudioSegment
+from pydub.silence import detect_nonsilent
 
 
 openai.api_key = os.getenv('openai.api_key')
+
+def is_audio_silent(file_path, silence_threshold=-50.0, silence_duration=3000):
+    """
+    Verifica si un archivo de audio está en silencio.
+
+    :param file_path: Ruta del archivo de audio.
+    :param silence_threshold: Umbral de silencio en dB (por defecto -50.0).
+    :param silence_duration: Duración mínima del silencio en milisegundos (por defecto 1000 ms).
+    :return: True si el audio está en silencio, False si contiene sonido.
+    """
+    audio = AudioSegment.from_file(file_path)
+    audio = audio.normalize()
+
+    # Ajustar el umbral de silencio
+    silence_thresh = audio.dBFS + silence_threshold
+    # thresh = segment.dBFS - (segment.max_dBFS - segment.dBFS)
+    # non_silent_ranges = pydub.silence.detect_nonsilent(segment, min_silence_len=1000, silence_thresh=thresh)
+
+    # Utiliza el método detect_nonsilent para encontrar rangos de audio no silencioso
+    nonsilent_ranges = detect_nonsilent(
+        audio,
+        min_silence_len=silence_duration,
+        # silence_thresh=audio.dBFS + silence_threshold
+        silence_thresh=silence_thresh + silence_threshold
+    )
+
+     # Imprimir los rangos no silenciosos detectados
+    if nonsilent_ranges:
+        print("Rangos no silenciosos detectados:", nonsilent_ranges)
+        return False  # Hay audio, por lo tanto, no es silencio
+    else:
+        print("No se detectaron rangos no silenciosos. El audio es considerado silencio.")
+        return True  # No hay audio, se considera silencio
+
 
 def upload_audio_file_in_storage_service(_mongod, _gridfs):
     try:
@@ -20,6 +56,22 @@ def upload_audio_file_in_storage_service(_mongod, _gridfs):
         # Obtener el archivo enviado en el formulario
         archivo = request.files['archivo']
 
+        # Crear un archivo temporal para verificar el silencio
+        temp_file_path = create_unique_temp_file(suffix=".wav")
+
+        # Guardar el archivo en un archivo temporal para análisis
+        with open(temp_file_path, 'wb') as temp_file:
+            temp_file.write(archivo.read())
+            temp_file.flush()
+
+        # Verificar si el audio está en silencio
+        if is_audio_silent(temp_file_path):
+            os.remove(temp_file_path)  # Eliminar el archivo temporal
+            return jsonify({'error': 'El audio está en silencio y no se almacenará.'}), 400
+
+        # Reiniciar el archivo en el objeto de archivo (se requiere para cargar nuevamente)
+        archivo.seek(0)
+
         title = request.form.get('title')
         full_filename = f"{title}"
         mimetype = archivo.mimetype
@@ -28,6 +80,10 @@ def upload_audio_file_in_storage_service(_mongod, _gridfs):
 
         # Subir el archivo a GridFS
         file_id = _gridfs.put(file_binary, filename=full_filename, content_type=mimetype)
+
+
+        # Eliminar el archivo temporal
+        os.remove(temp_file_path)
 
         # Responder con el ID del archivo subido y los metadatos
         return jsonify({
@@ -97,6 +153,14 @@ def generate_report_from_transcript(transcript_text):
     :param transcript_text: Texto de la transcripción obtenida de Whisper.
     :return: Reporte formateado.
     """
+
+     # Agregar un log para verificar el contenido de transcript_text
+    print(f"Contenido de transcript_text: '{transcript_text}'")  # Debugging
+
+    # Verifica si el texto de la transcripción está vacío o solo contiene espacios en blanco
+    if not transcript_text or transcript_text.strip() == "":
+        return jsonify({'error': 'La transcripción está vacía o en silencio. No se puede generar un reporte.'}), 400
+
     # Instrucciones y transcripción para enviar a ChatGPT
     messages = [
         {"role": "system", "content": "Eres un asistente que formatea transcripciones en un reporte médico estructurado."},
@@ -123,6 +187,8 @@ def generate_report_from_transcript(transcript_text):
         #         {"role": "user", "content": prompt}
         #     ]
         # )
+
+        # Llamada a la API de OpenAI para generar el reporte
         response = openai.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
@@ -141,16 +207,6 @@ def generate_report_from_transcript(transcript_text):
 
 def send_audio_to_whisper_service(file_id, _gridfs):
     try:
-        # # Intenta encontrar el archivo en GridFS
-        # file_data = _gridfs.find_one({"_id": ObjectId(file_id)})
-        # # file_data = get_audio_file(file_id, _gridfs)
-
-        # if not file_data:
-        #     return jsonify({'error': 'Archivo no encontrado'}), 404
-
-        # # Recuperar el archivo en formato binario
-        # file_binary = _gridfs.get(file_data._id).read()
-
         # Usa la función get_audio_from_gridfs para obtener el archivo desde GridFS
         file_binary, mimetype, filename = get_audio_from_gridfs(file_id, _gridfs)
 
