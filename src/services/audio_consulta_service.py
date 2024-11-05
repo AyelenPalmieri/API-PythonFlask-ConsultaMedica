@@ -9,44 +9,83 @@ from bson import Binary, json_util, ObjectId
 import openai
 from config.mongodb import mongo
 from pydub import AudioSegment
-from pydub.silence import detect_nonsilent
+import speech_recognition as sr
+# from pydub import AudioSegment
+# from pydub.silence import detect_nonsilent
 
 
 openai.api_key = os.getenv('openai.api_key')
 
-def is_audio_silent(file_path, silence_threshold=-50.0, silence_duration=3000):
+# def is_audio_silent(file_path, silence_threshold=-0.0, silence_duration=5000):
+#     """
+#     Verifica si un archivo de audio está en silencio.
+
+#     :param file_path: Ruta del archivo de audio.
+#     :param silence_threshold: Umbral de silencio en dB (por defecto -50.0).
+#     :param silence_duration: Duración mínima del silencio en milisegundos (por defecto 1000 ms).
+#     :return: True si el audio está en silencio, False si contiene sonido.
+#     """
+#     audio = AudioSegment.from_file(file_path)
+#     audio = audio.normalize()
+
+#     # Ajustar el umbral de silencio
+#     silence_thresh = audio.dBFS + silence_threshold
+#     print(f"Nivel de silencio: {silence_thresh} dB")
+#     print(f"Nivel promedio del audio: {audio.dBFS} dB")
+
+#     # thresh = segment.dBFS - (segment.max_dBFS - segment.dBFS)
+#     # non_silent_ranges = pydub.silence.detect_nonsilent(segment, min_silence_len=1000, silence_thresh=thresh)
+
+#     # Utiliza el método detect_nonsilent para encontrar rangos de audio no silencioso
+#     nonsilent_ranges = detect_nonsilent(
+#         audio,
+#         min_silence_len=silence_duration,
+#         # silence_thresh=audio.dBFS + silence_threshold
+#         silence_thresh=silence_thresh + silence_threshold
+#     )
+
+#      # Imprimir los rangos no silenciosos detectados
+#     if nonsilent_ranges:
+#         print("Rangos no silenciosos detectados:", nonsilent_ranges)
+#         return False  # Hay audio, por lo tanto, no es silencio
+#     else:
+#         print("No se detectaron rangos no silenciosos. El audio es considerado silencio.")
+#         return True  # No hay audio, se considera silencio
+
+def is_audio_silent(file_path):
     """
-    Verifica si un archivo de audio está en silencio.
+    Verifica si un archivo de audio contiene habla o solo ruido/silencio.
 
     :param file_path: Ruta del archivo de audio.
-    :param silence_threshold: Umbral de silencio en dB (por defecto -50.0).
-    :param silence_duration: Duración mínima del silencio en milisegundos (por defecto 1000 ms).
-    :return: True si el audio está en silencio, False si contiene sonido.
+    :return: True si el audio contiene solo ruido o silencio, False si contiene habla.
     """
-    audio = AudioSegment.from_file(file_path)
-    audio = audio.normalize()
+    recognizer = sr.Recognizer()
+    audio_segment = AudioSegment.from_file(file_path)
 
-    # Ajustar el umbral de silencio
-    silence_thresh = audio.dBFS + silence_threshold
-    # thresh = segment.dBFS - (segment.max_dBFS - segment.dBFS)
-    # non_silent_ranges = pydub.silence.detect_nonsilent(segment, min_silence_len=1000, silence_thresh=thresh)
+    # Convertir el archivo de audio a un formato compatible para el análisis
+    wav_path = file_path.replace(".wav", "_temp.wav")
+    audio_segment.export(wav_path, format="wav")
 
-    # Utiliza el método detect_nonsilent para encontrar rangos de audio no silencioso
-    nonsilent_ranges = detect_nonsilent(
-        audio,
-        min_silence_len=silence_duration,
-        # silence_thresh=audio.dBFS + silence_threshold
-        silence_thresh=silence_thresh + silence_threshold
-    )
+    try:
+        # Cargar el archivo de audio para el reconocimiento de voz
+        with sr.AudioFile(wav_path) as source:
+            audio_data = recognizer.record(source)
 
-     # Imprimir los rangos no silenciosos detectados
-    if nonsilent_ranges:
-        print("Rangos no silenciosos detectados:", nonsilent_ranges)
-        return False  # Hay audio, por lo tanto, no es silencio
-    else:
-        print("No se detectaron rangos no silenciosos. El audio es considerado silencio.")
-        return True  # No hay audio, se considera silencio
-
+            try:
+                # Intentar reconocer el habla en el archivo de audio
+                recognizer.recognize_google(audio_data)
+                print("Se detectó habla, no es silencio ni solo ruido")
+                return False  # Se detectó habla, no es silencio ni solo ruido
+            except sr.UnknownValueError:
+                print("No se detectó habla, se considera ruido o silencio")
+                return True  # No se detectó habla, se considera ruido o silencio
+            except sr.RequestError:
+                print("Error con el servicio de reconocimiento de voz")
+                return True
+    finally:
+        # Eliminar archivo temporal después de que todos los procesos hayan terminado
+        if os.path.exists(wav_path):
+            os.remove(wav_path)
 
 def upload_audio_file_in_storage_service(_mongod, _gridfs):
     try:
@@ -64,10 +103,10 @@ def upload_audio_file_in_storage_service(_mongod, _gridfs):
             temp_file.write(archivo.read())
             temp_file.flush()
 
-        # Verificar si el audio está en silencio
+        # Verificar si el audio contiene solo ruido o silencio
         if is_audio_silent(temp_file_path):
-            os.remove(temp_file_path)  # Eliminar el archivo temporal
-            return jsonify({'error': 'El audio está en silencio y no se almacenará.'}), 400
+            os.remove(temp_file_path)
+            return jsonify({'error': 'El audio no contiene habla y no se almacenará.'}), 412
 
         # Reiniciar el archivo en el objeto de archivo (se requiere para cargar nuevamente)
         archivo.seek(0)
@@ -99,6 +138,26 @@ def upload_audio_file_in_storage_service(_mongod, _gridfs):
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+def delete_audio_file_from_storage_service(file_id, _gridfs):
+    try:
+        # Convertir el file_id a un ObjectId
+        object_id = ObjectId(file_id)
+
+        # Verificar si el archivo existe en GridFS
+        if not _gridfs.exists(object_id):
+            return jsonify({'error': 'El archivo no existe'}), 404
+
+        # Eliminar el archivo de GridFS
+        _gridfs.delete(object_id)
+
+        # Responder con un mensaje de confirmación
+        return jsonify({'message': 'Archivo eliminado correctamente'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 def get_audio_from_gridfs(file_id, _gridfs):
     try:
@@ -146,20 +205,118 @@ def create_unique_temp_file(suffix=".wav"):
     return temp_file.name
 
 
+def send_audio_to_whisper_service(file_id, _gridfs):
+    try:
+        # Usa la función get_audio_from_gridfs para obtener el archivo desde GridFS
+        file_binary, mimetype, filename = get_audio_from_gridfs(file_id, _gridfs)
+
+        if file_binary is None:
+            return jsonify({'error': mimetype}), 404  # mimetype contiene el mensaje de error
+
+        # Verifica que el archivo sea de tipo audio
+        if not mimetype.startswith('audio/'):
+            return jsonify({'error': 'El archivo recuperado no es de tipo audio'}), 400
+
+        # Crear archivos temporales con nombres únicos
+        temp_file_path = create_unique_temp_file(suffix=".wav")
+        converted_file_path = create_unique_temp_file(suffix=".wav")
+
+        # # Guardar el archivo binario en el archivo temporal
+        # with open(temp_file_path, 'wb') as temp_file:
+        #     temp_file.write(file_binary)
+        #     temp_file.flush()
+
+        try:
+            # Guardar y convertir el archivo a .wav
+            save_file(temp_file_path, file_binary)
+            convert_to_wav(temp_file_path, converted_file_path)
+
+            # # Convertir el archivo a formato .wav usando ffmpeg
+            # subprocess.run(['ffmpeg', '-y', '-i', temp_file_path, converted_file_path], check=True)
+
+            # Transcribir el audio usando Whisper
+            transcript_text = transcribe_audio(converted_file_path)
+
+            # # Ahora enviamos el archivo convertido a Whisper para transcripción
+            # with open(converted_file_path, 'rb') as audio_file:
+            #     transcription  = openai.audio.transcriptions.create(
+            #         model="whisper-1",
+            #         file=audio_file
+            #     )
+
+            # La transcripción se obtiene accediendo al atributo "text"
+            # transcript_text = transcription.text
+
+            # # Eliminar los archivos temporales
+            # os.remove(temp_file_path)
+            # os.remove(converted_file_path)
+
+            # # return jsonify({'transcription': transcript_text}), 200
+            # return generate_report_from_transcript(transcript_text)
+
+            # Verifica si el texto de la transcripción está vacío o solo contiene espacios en blanco
+            if not transcript_text or transcript_text.strip() == "":
+                return jsonify({'error': 'La transcripción está vacía. No se puede generar un reporte.'}), 412
+
+            # Generar el reporte formateado a partir de la transcripción
+            return generate_report_from_transcript(transcript_text)
+
+        finally:
+            # Asegurar la eliminación de archivos temporales
+            cleanup_files([temp_file_path, converted_file_path])
+
+    except Exception as e:
+        return jsonify({'error': f'Error en el procesamiento del audio: {str(e)}'}), 500
+
+
+def save_file(file_path, file_binary):
+    # Guardar el archivo binario en el archivo temporal
+    with open(file_path, 'wb') as temp_file:
+        temp_file.write(file_binary)
+        temp_file.flush()
+
+def convert_to_wav(input_path, output_path):
+    """Convierte un archivo de audio a .wav usando ffmpeg."""
+    try:
+        subprocess.run(['ffmpeg', '-y', '-i', input_path, output_path], check=True)
+    except subprocess.CalledProcessError as e:
+        raise Exception(f"Error en la conversión a WAV: {str(e)}")
+
+def transcribe_audio(file_path):
+    """Usa el modelo de Whisper para transcribir el audio."""
+    try:
+        # Ahora enviamos el archivo convertido a Whisper para transcripción
+        with open(file_path, 'rb') as audio_file:
+            transcription = openai.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
+        return transcription.text
+    except Exception as e:
+        raise Exception(f"Error en la transcripción del audio: {str(e)}")
+
+
+def cleanup_files(file_paths):
+    """Elimina los archivos temporales especificados."""
+    for path in file_paths:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception as e:
+            print(f"Error al eliminar el archivo {path}: {str(e)}")
+
+
 def generate_report_from_transcript(transcript_text):
     """
     Función que toma una transcripción y la envía a la API de OpenAI para formatearla en un reporte.
+    Genera un reporte médico formateado a partir de una transcripción.
 
     :param transcript_text: Texto de la transcripción obtenida de Whisper.
     :return: Reporte formateado.
     """
 
-     # Agregar un log para verificar el contenido de transcript_text
+    # Agrego un log para verificar el contenido de transcript_text
     print(f"Contenido de transcript_text: '{transcript_text}'")  # Debugging
-
-    # Verifica si el texto de la transcripción está vacío o solo contiene espacios en blanco
-    if not transcript_text or transcript_text.strip() == "":
-        return jsonify({'error': 'La transcripción está vacía o en silencio. No se puede generar un reporte.'}), 400
 
     # Instrucciones y transcripción para enviar a ChatGPT
     messages = [
@@ -202,52 +359,8 @@ def generate_report_from_transcript(transcript_text):
         return jsonify({'formatted_report': formatted_report}), 200
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+         return jsonify({'error': f'Error al generar el reporte: {str(e)}'}), 500
 
-
-def send_audio_to_whisper_service(file_id, _gridfs):
-    try:
-        # Usa la función get_audio_from_gridfs para obtener el archivo desde GridFS
-        file_binary, mimetype, filename = get_audio_from_gridfs(file_id, _gridfs)
-
-        if file_binary is None:
-            return jsonify({'error': mimetype}), 404  # mimetype contiene el mensaje de error
-
-        # Verifica que el archivo sea de tipo audio
-        if not mimetype.startswith('audio/'):
-            return jsonify({'error': 'El archivo recuperado no es de tipo audio'}), 400
-
-        # Crear archivos temporales con nombres únicos
-        temp_file_path = create_unique_temp_file(suffix=".wav")
-        converted_file_path = create_unique_temp_file(suffix=".wav")
-
-        # Guardar el archivo binario en el archivo temporal
-        with open(temp_file_path, 'wb') as temp_file:
-            temp_file.write(file_binary)
-            temp_file.flush()
-
-        # Convertir el archivo a formato .wav usando ffmpeg
-        subprocess.run(['ffmpeg', '-y', '-i', temp_file_path, converted_file_path], check=True)
-
-        # Ahora enviamos el archivo convertido a Whisper para transcripción
-        with open(converted_file_path, 'rb') as audio_file:
-            transcription  = openai.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file
-            )
-
-        # La transcripción se obtiene accediendo al atributo "text"
-        transcript_text = transcription.text
-
-        # Eliminar los archivos temporales
-        os.remove(temp_file_path)
-        os.remove(converted_file_path)
-
-        # return jsonify({'transcription': transcript_text}), 200
-        return generate_report_from_transcript(transcript_text)
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 
 
@@ -329,5 +442,10 @@ def create_audioConsulta_service():
 #     else:
 #         return 'audioConsulta not found', 404
 
-
+# def delete_audio_service(id):
+#      response = mongo.db.audioConsulta.delete_one({'_id': ObjectId(id)})
+#      if response.deleted_count >= 1:
+#          return 'audioConsulta deleted successfully', 200
+#      else:
+#          return 'audioConsulta not found', 404
 

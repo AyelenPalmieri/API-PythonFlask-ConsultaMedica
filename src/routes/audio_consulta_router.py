@@ -1,6 +1,6 @@
 from flask import Blueprint, request
 
-from services.audio_consulta_service import send_audio_to_whisper_service, upload_audio_file_in_storage_service, get_audio_file
+from services.audio_consulta_service import send_audio_to_whisper_service, upload_audio_file_in_storage_service, get_audio_file, delete_audio_file_from_storage_service
 #create_audio_service, get_all_audio_service, get_audio_service, update_audio_service, delete_audio_service,
 
 audio_consulta_service = Blueprint('audio_consulta_service', __name__)
@@ -41,4 +41,6 @@ def init_audio_consulta_service(db, fs):
     # def delete_audio(id):
     #     return delete_audio_service(id)
 
-
+    @audio_consulta_service.route('/delete/file/<file_id>', methods=['DELETE'])
+    def delete_audio_file(file_id):
+        return delete_audio_file_from_storage_service(file_id, fs)
